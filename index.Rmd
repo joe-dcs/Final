@@ -1,0 +1,283 @@
+---
+title: Invasion Dynamics of a Brittle Star at Different Spatial Scales across the
+  West Atlantic
+author: "Jospeh Benz"
+subtitle: Can Tropical Storms be a Driver of Invasion?
+---
+
+# Introduction
+
+*Ophiothela* *mirabilis* is a tiny (~ 5 mm) orange brittle star natively found on Pacific tropical reefs. It lives on structures like hard corals, soft corals, and sponges, where it feeds on particulates in the water column (Hendler et al., 2012). In the year 2000, it was found on reefs in coastal Brazil, and has been spreading through the Caribbean since, recently discovered in Florida in 2020 (Glynn et al., 2020 & Mantelatto et al., 2016).  In this invasive range, *O.* *mirabilis* generally reproduces asexually, splitting down the middle in a process called fissiparity, allowing it to rapidly spread across the reef. However, the mechanism for this spread is largely unknown; they are negatively buoyant and very poor swimmers, and are likely taking advantage of some other method to travel the great distances between islands in the Caribbean.  The two prevailing hypothesis include *O.* *mirabilis* being transported by shipping traffic (either in bilge water or on boat hulls) or by “rafting” on patches of *Sargassum*, a floating macroalgae common to the area, but tropical storms may also be playing a role in this spread (Glynn et al., 2020). 
+
+In order to determine the invasion dynamics of this species, we examine the data at two different spatial scales: the West Atlantic Tropics and the island of St. John, USVI.  Looking at the entire west Atlantic will allow us to examine the saltatory spread (large jumps across habitat gaps), while focusing in on a single island informs the smaller scale spread between adjacent reefs after the brittle star has arrived. 
+
+We will first create an interactive timeline map to visualize the invasion over the past 25 years, and then examine the number of storm events experienced by each island in the Caribbean, predicting that islands with more events are more likely to be invaded. Finally, we will examine the efficacy of spread at a smaller scale, examining how the invasion progresses on adjacent reefs on the same island. 
+
+# Materials and methods
+
+## Required packages:
+```{r message=F, warning=F}
+library(shiny)
+library(leaflet)
+library(spocc)
+library(tidyverse)
+library(leaflet.extras2)
+library(rsconnect)
+library(sf)
+library(rnoaa)
+library(spData)
+library(sp)
+library(knitr)
+library(kableExtra)
+library(raster)
+library(data.table)
+```
+
+
+
+## Timeline Data Retreival 
+First, a bounding box for the larger spatial scale is created.
+
+```{r}
+Carib_extent <- extent(c(xmin=-130,xmax=-17,ymin=-26,ymax=33))
+bbox1 <- bbox(Carib_extent)
+```
+
+Using the occ() function from the Spocc package (SPecies OCCurrence), we can examine occurrence data for *Ophiothela* *mirabilis* within our bounding box, utilizing an array of online databases. In this case, species records are only used from the Global Biodiversity Information Facility (GBIF) to prevent the duplication of observations. Then, occ2df() will download and convert our occurrences into a data frame with latitude and longitude.   
+
+```{r}
+OM <- occ("Ophiothela mirabilis", from = c('gbif'), has_coords=TRUE, limit=1000000, geometry=bbox1)
+OMdf <- occ2df(OM)
+```
+
+Data collected in St. John by yours truly is then downloaded, hosted on my Github page. This includes the reef sites I examined for *O.* *mirabilis* between June and August, 2021. 
+
+
+
+### Collection Methods
+
+100x2 meter belt transects were laid from a random starting point on the reef, parallel to shore. All *Gorgonia* *spp.* colonies (also known as sea fans) within this transect were closely examined for the presence of the invasive brittle star, then tallied. At least 100 individual colonies were assessed within each transect. These surveys were repeated after roughly a month for all initial sites, and also expanded to a few new sites.  
+
+
+
+```{r}
+StJohn <- read.csv("https://raw.githubusercontent.com/joe-dcs/final_project_data/main/brittleinfection.csv", header=T)
+```
+
+
+
+## Timeline Data Processing 
+
+The initial species occurrence data frame is then edited to create a new column, titled "Year." This function simplifies the YYYY-MM-DD formatted "date" column into a four digit year. The two data frames were then joined along 3 shared columns. Occurrences from the year 1971 were also filtered out, as these observation were likely of a museum specimen; they was found in a landlocked portion of Venezuela. 
+
+```{r}
+OMdf$Year <- format(as.Date(OMdf$date, format="%Y/%m/%d"),"%Y")  
+
+StJohn <- StJohn %>%
+  mutate(Year = as.character(Year))
+
+OMdfjoined <- OMdf %>% 
+    full_join(StJohn,by=c("longitude"= "longitude", "latitude"= "latitude", "Year"="Year"))
+
+OMdf2 <- OMdfjoined %>%
+  filter(Year!=1971) 
+
+head(OMdf2)
+```
+
+
+
+## Storm Data Retreival 
+
+Tropical storm data was obtained from the NOAA database, downloaded, and unzipped for further processing. The world dataset did not contain all island nations within the Caribbean, so a sahapefile for Caribbean nations was downloaded from the USGS website. 
+
+```{r message=FALSE}
+dataurl="https://www.ncei.noaa.gov/data/international-best-track-archive-for-climate-stewardship-ibtracs/v04r00/access/shapefile/IBTrACS.NA.list.v04r00.points.zip"
+tdir=tempdir()
+download.file(dataurl,destfile=file.path(tdir,"temp.zip"))
+unzip(file.path(tdir,"temp.zip"),exdir = tdir)
+list.files(tdir)
+
+storms <- read_sf(list.files(tdir,pattern=".shp",full.names = T))
+
+
+dataurl2="http://pubs.usgs.gov/of/2004/1400/data/boundaries/caribis/caribis.zip"
+download.file(dataurl2, destfile="CaribSP/carib.zip")
+unzip(zipfile="CaribSP/carib.zip", exdir= "CaribSP")
+
+carib <- st_read("CaribSP/caribis.shp")
+```
+
+
+
+## Storm Data Processing
+
+The storm data was then filtered down to the last twenty years, cleaned, and a decade column was derived from the year. This data was then spatially joined with the Caribbean Islands shapefile, capturing the overlap of the storm path and island location. A sum row was created to examine if the number of storms changed in the past two decades.
+
+```{r message=FALSE}
+storms_recent <- storms %>% #Initial processing borrowed from my own Week 9 case study
+  filter(SEASON > 1999)%>% 
+  mutate_if(is.numeric, function(x) ifelse(x==-999.0,NA,x))%>% 
+  mutate(decade=(floor(year/10)*10)) 
+
+storms_carib_2000s <- st_join(storms_recent, carib, join = st_intersects,left = F)%>%
+  filter(decade==2000)%>%
+  group_by(CNTRY_NAME)%>%
+  summarize(storms=length(unique(NAME)))%>%
+  arrange(desc(storms))%>%
+   rename("Caribbean Nation" = CNTRY_NAME, "Storm Events" = storms)
+
+storms_carib_2010s <- st_join(storms_recent, carib, join = st_intersects,left = F)%>%
+  filter(decade==2010)%>%
+  group_by(CNTRY_NAME)%>%
+  summarize(storms=length(unique(NAME)))%>%
+  arrange(desc(storms))%>%
+  rename("Caribbean Nation" = CNTRY_NAME, "Storm Events" = storms)
+
+table1 <- st_set_geometry(storms_carib_2000s, NULL)%>%
+  data.frame(stringsAsFactors = FALSE)
+
+func <- function(z) if (is.numeric(z)) sum(z) else '' 
+sumrow1 <- as.data.frame(lapply(table1, func))
+sumrow1[1] <- "Total"
+sumtable1 <- rbind(table1, sumrow1)
+colnames <- data.frame("Caribbean Nation", "Storm Events", stringsAsFactors = FALSE)
+colnames(sumtable1) <- colnames
+
+
+table2 <- st_set_geometry(storms_carib_2010s, NULL)%>%
+  data.frame(stringsAsFactors = FALSE)
+
+sumrow2 <- as.data.frame(lapply(table2, func))
+sumrow2[1] <- "Total"
+sumtable2 <- rbind(table2, sumrow2)
+colnames(sumtable2) <- colnames
+```
+
+
+
+# Results
+
+
+
+## Invasion Timeline
+
+This interactive graphic allows us to visualize novel sightings, year by year, as the species marches up from Brazil and across the Antilles. It should also be noted that *O.* *mirabilis* was present near the Panama Canal years before the invasion in Brazil was recorded.   
+```{r cache=FALSE, echo=FALSE, warning=FALSE}
+ui <- bootstrapPage(
+  tags$style(type = "text/css", "html, body {width:100%;height:100%}"),
+  leafletOutput("map", width = "100%", height = "100%"),
+  absolutePanel(bottom = 30, right = 10,
+                sliderInput("Year", "Year", 1995, 2021, value = 1995, step = 1, sep = "")
+  )
+)
+
+server <- function(input, output, session) {
+  
+  sliderData <- reactive({
+    OMdf2 %>%
+      filter(Year <= input$Year)
+  })
+  
+  output$map <- renderLeaflet({
+    leaflet() %>%
+      addTiles() %>%
+      fitBounds(min(OMdf2$longitude), min(OMdf2$latitude),
+                max(OMdf2$longitude), max(OMdf2$latitude))
+  })
+  
+  observe({
+    leafletProxy("map", data = sliderData()) %>%
+      clearMarkers() %>%
+      addTiles() %>%
+      addMarkers(lng = ~longitude, lat = ~latitude)
+  })
+}
+
+shinyApp(ui = ui, server = server)
+```
+These data points tread northwest as time progresses, following the coastline of Brazil until reaching the Lesser Antilles. *O.* *mirabilis* spread seems to accelerate in 2013, invading distant habitat over 4000 kilometers away within 3 years. Could an increase in tropical storms during the 2010s increase the invasability of *O.* *mirabilis*?     
+
+
+
+## Storm Events
+
+```{r echo=FALSE}
+kable(sumtable1, caption = "Caribbean Hurricanes of the 2000s", booktabs = TRUE)%>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed")) %>%
+  row_spec(dim(sumtable1)[1], bold = T) %>%
+  column_spec(1, italic = T) 
+```
+
+
+```{r echo=FALSE}
+knitr::kable(sumtable2, caption = "Caribbean Hurricanes of the 2010s", booktabs = TRUE) %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed")) %>%
+  row_spec(dim(sumtable2)[1], bold = T) %>%
+  column_spec(1, italic = T) 
+```
+
+Interestingly, the amount of storms that struck Caribbean island nations in the 2000s and 2010s were exactly the same. Distribution changed slightly, but Cuba remained at the top with the most events. 
+
+## St. John Reef Sites
+
+The *O.* *mirabilis* invasion is progressing swiftly along the reefs of St. John. After roughly a month, all initially invaded sites saw increases in percent of invaded *Gorgonia* *spp.* colonies. Also, we were able to capture a spread event, as the Deep Tektite site now has a single invaded colony! 
+```{r echo=FALSE, fig.align='center', fig.width= 11}
+ggplot(data=subset(StJohn, !is.na(percent.invaded.1)), aes(x = site.name, weight = percent.invaded.1)) +
+  geom_bar(position = "dodge", fill = "#FF8C00") +
+  labs(
+    x = "Study Sites",
+    y = "Invasion rate (%)",
+    title = "Proportion of Gorgonia sp. colonies invaded by Ophiothela mirabilis (July)"
+  ) +
+  theme_light() +
+  theme(
+    plot.title = element_text(size = 22L),
+    axis.title.y = element_text(size = 18L),
+    axis.title.x = element_text(size = 18L)
+  ) +
+  ylim(0, 0.6)
+```
+
+
+```{r echo=FALSE, fig.align='center', fig.width= 12}
+ggplot(StJohn) +
+  aes(x = site.name, weight = percent.invaded.2) +
+  geom_bar(position = "dodge", fill = "#FF8C00") +
+  labs(
+    x = "Study Sites",
+    y = "Invasion rate (%)",
+    title = "Proportion of Gorgonia sp. colonies invaded by Ophiothela mirabilis (August)"
+  ) +
+  theme_light() +
+  theme(
+    plot.title = element_text(size = 22L),
+    axis.title.y = element_text(size = 18L),
+    axis.title.x = element_text(size = 18L)
+  ) +
+  ylim(0, 0.6)
+```
+
+
+
+# Conclusions
+
+The results clearly show the path *O.* *mirabilis* has taken thus far in its invasion of the Western Atlantic. It is clearly still spreading at both spatial scales, invading new islands and new reefs simultaneously. However, gaps still exist in our knowledge, as this occurrence data is likely incomplete. As a relatively new (and objectively tiny) invasive species, it can be easy to miss on coral colonies without a developed search pattern, especially when there are only a handful present. More comprehensive surveys are necessary to accurately capture the invasion path, but a few insight can be gleaned. The sudden appearance in Brazil implies initial spread was likely not from natural phenomena, as the trip to Rio from the Panama canal is solidly against the prevailing currents. The lack of any recorded sightings in the Gulf of Mexico or the Mexican Atlantic coast indicates invasion pressure is greater following the arc of the Lesser Antilles. 
+
+The storm frequency data points to storms not being a major factor for this species' spread, as total storm event frequency did not change between decades, and none of the islands It has been seen upon had an inordinate number of storm events. Unfortunately, this dataset is somewhat limited as it only tracks the eye of the storm on its journey, not the full extent of the storm's outer lobes. This is likely why a large island like Cuba has so many storm events, there is a greater chance of intersection as it is a much larger target than, say, St. John.   
+
+The next step for this research would likely include an analysis of shipping lanes across the region and an interactive ocean current map. *Sargassum* could also be identified and tracked  from existing NASA AQUA and Landsat satellites, as described by Pollard & Ramsewak (2016).    
+
+
+# References
+
+Mantelatto, M. C., L. F. Vidon, R. B. Silveira, C. Menegola, R. M. Da Rocha, and J. C. Creed. 2016. Host species of the non-indigenous brittle star Ophiothela mirabilis (Echinodermata: Ophiuroidea): An invasive generalist in Brazil? Marine Biodiversity Records 9:1–7.
+
+Hendler, G., A. E. Migotto, C. R. R. Ventura, and L. Wilk. 2012. Epizoic Ophiothela brittle stars have invaded the Atlantic. Coral Reefs 31:1005.
+
+Pollard, P., D. Ramsewak, and S. Bradshaw. 2016. A review of GIS and Remote Sensing methods for Sargassum sp. mapping and monitoring. 8th URISA Caribbean GIS Conference.
+
+Glynn, P. W., R. Alitto, J. Dominguez, A. B. Christensen, P. Gillette, N. Martinez, B. M. Riegl, and K. Dettloff. 2020. A tropical eastern Pacific invasive brittle star species (Echinodermata: Ophiuroidea) reaches southeastern Florida. Page Advances in Marine Biology. First edition. Elsevier Ltd.
+
+https://pubs.usgs.gov/of/2004/1400/data/boundaries/caribis/caribis.htm
+
