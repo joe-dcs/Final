@@ -1,7 +1,7 @@
 ---
 title: Invasion Dynamics of a Brittle Star at Different Spatial Scales across the
   West Atlantic
-author: "Jospeh Benz"
+author: "Joseph Benz"
 subtitle: Can Tropical Storms be a Driver of Invasion?
 ---
 
@@ -46,8 +46,10 @@ bbox1 <- bbox(Carib_extent)
 Using the occ() function from the Spocc package (SPecies OCCurrence), we can examine occurrence data for *Ophiothela* *mirabilis* within our bounding box, utilizing an array of online databases. In this case, species records are only used from the Global Biodiversity Information Facility (GBIF) to prevent the duplication of observations. Then, occ2df() will download and convert our occurrences into a data frame with latitude and longitude.   
 
 ```{r}
-OM <- occ("Ophiothela mirabilis", from = c('gbif'), has_coords=TRUE, limit=1000000, geometry=bbox1)
+OM <- occ("Ophiothela mirabilis", from = 'gbif', has_coords=TRUE, limit=1000000, geometry=bbox1)
+
 OMdf <- occ2df(OM)
+  
 ```
 
 Data collected in St. John by yours truly is then downloaded, hosted on my Github page. This includes the reef sites I examined for *O.* *mirabilis* between June and August, 2021. 
@@ -61,7 +63,7 @@ Data collected in St. John by yours truly is then downloaded, hosted on my Githu
 
 
 ```{r}
-StJohn <- read.csv("https://raw.githubusercontent.com/joe-dcs/final_project_data/main/brittleinfection.csv", header=T)
+StJohn <- read.csv("https://raw.githubusercontent.com/joe-dcs/final_project_data/main/brittleinfection2.csv", header=T)
 ```
 
 
